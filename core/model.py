@@ -1,196 +1,399 @@
+import logging
 import torch
 import torch.nn as nn
-class CNNEncoder(nn.Module):
-    def __init__(self, dropout_rate=0.1):
-        super(CNNEncoder, self).__init__()
-        
-        # 64x64x1 -> 32x32x32
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.Dropout2d(dropout_rate),
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(dropout_rate)
-        )
-        
-        # 32x32x32 -> 16x16x64
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Dropout2d(dropout_rate),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(dropout_rate)
-        )
-        
-        # 16x16x64 -> 8x8x128
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.Dropout2d(dropout_rate),
-            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(dropout_rate)
-        )
-        
-        # 8x8x128 -> 4x4x256
-        self.conv4 = nn.Sequential(
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.Dropout2d(dropout_rate),
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(dropout_rate)
-        )
-        
+
+class InceptionBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, kernel_sizes: list[int], dropout_rate: float = 0.1):
+        super(InceptionBlock, self).__init__()
+
+        self.branches = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=kernel_size,
+                    padding=kernel_size//2
+                ),
+                nn.BatchNorm2d(out_channels),
+                nn.ReLU(),
+                nn.Dropout2d(p=dropout_rate)
+            ) for kernel_size in kernel_sizes
+        ])
+    
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.conv3(x)
-        x = self.conv4(x)
+        outputs = [branch(x) for branch in self.branches]
+        concatenated_out = torch.cat(tensors=outputs, dim=1)
+        return concatenated_out
+class ModelK3(nn.Module):
+
+    """
+    This model has been designed for 8*8 FCGR input
+    K=3
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, inception_kernel_sizes: list[int], dropout_rate: float):
+        super(ModelK3, self).__init__()
+
+        logging.info(f"ModelK3 initialized with inception kernel sizes {inception_kernel_sizes} and dropout_rate {dropout_rate}")
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU()
+        )
+        self.inception_block = InceptionBlock(
+            in_channels=out_channels,
+            out_channels=64,
+            kernel_sizes=inception_kernel_sizes,
+            dropout_rate=0.1
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=192,
+                out_channels=128,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Dropout2d(p=dropout_rate)
+        )
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=128,
+                out_channels=64,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Dropout2d(p=dropout_rate)
+        )
+    
+    def forward(self, x):
+        x = self.conv1(x)           # output: 32*8*8
+        x = self.inception_block(x) # output: 192*8*8
+        x = self.conv2(x)           # output: 128*8*8
+        x = self.pool(x)            # output: 128*4*4
+        x = self.conv3(x)           # output: 64*4*4
+        x = torch.flatten(input=x, start_dim=1)
         return x
 
+class ModelK4(nn.Module):
+    """
+    This model has been designed for 16*16 FCGR input
+    K=4
+    """
 
-class ViTEncoder(nn.Module):
-    def __init__(self, embed_dim=256, num_heads=8, num_layers=4, mlp_dim=512):
-        super(ViTEncoder, self).__init__()
-        
-        self.embed_dim = embed_dim
-        self.num_patches = 16  # 4x4
-        
-        # Patch embedding: 256 channels -> embed_dim
-        self.patch_embed = nn.Linear(256, embed_dim)
-        
-        # CLS token
-        self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim))
-        
-        # Positional embedding
-        self.pos_embed = nn.Parameter(torch.randn(1, self.num_patches + 1, embed_dim))
-        
-        # Transformer encoder
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embed_dim,
-            nhead=num_heads,
-            dim_feedforward=mlp_dim,
-            dropout=0.1,
-            activation='gelu',
-            batch_first=True
+    def __init__(self, in_channels: int, out_channels: int, inception_kernel_sizes: list[int], dropout_rate: float):
+        super(ModelK4, self).__init__()
+        logging.info(f"ModelK4 initialized with inception kernel sizes {inception_kernel_sizes} and dropout_rate {dropout_rate}")
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU()
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        
-        self.norm = nn.LayerNorm(embed_dim)
-        
+
+        self.inception_block = InceptionBlock(
+            in_channels=out_channels,
+            out_channels=64,
+            kernel_sizes=inception_kernel_sizes,
+            dropout_rate=0.1
+        )
+
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=192,
+                out_channels=128,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Dropout2d(p=dropout_rate)
+        )
+
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=128,
+                out_channels=64,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Dropout2d(p=dropout_rate)
+        )
+
     def forward(self, x):
-        # x: (batch, 256, 4, 4)
-        batch_size = x.shape[0]
-        
-        # Reshape to patches: (batch, 16, 256)
-        x = x.flatten(2).transpose(1, 2)
-        
-        # Patch embedding
-        x = self.patch_embed(x)  # (batch, 16, embed_dim)
-        
-        # Add CLS token
-        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        x = torch.cat([cls_tokens, x], dim=1)  # (batch, 17, embed_dim)
-        
-        # Add positional embedding
-        x = x + self.pos_embed
-        
-        # Transformer
-        x = self.transformer(x)
-        x = self.norm(x)
-        
-        # Return CLS token
-        return x[:, 0]  # (batch, embed_dim)
+        x = self.conv1(x)           # output: 32*16*16
+        x = self.inception_block(x) # output: 192*16*16
+        x = self.pool1(x)           # output: 192*8*8
+        x = self.conv2(x)           # output: 128*8*8
+        x = self.pool2(x)           # output: 128*4*4
+        x = self.conv3(x)           # output: 64*4*4
+        x = torch.flatten(input=x, start_dim=1)
+        return x
 
+class ModelK5(nn.Module):
+    """
+    This model has been designed for 32*32 FCGR input
+    K=5
+    """
 
-class CrossAttention(nn.Module):
-    def __init__(self, embed_dim=256, num_heads=8):
-        super(CrossAttention, self).__init__()
-        
-        self.multihead_attn = nn.MultiheadAttention(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            dropout=0.1,
-            batch_first=True
+    def __init__(self, in_channels: int, out_channels: int, inception_kernel_sizes: list[int], dropout_rate: float):
+        super(ModelK5, self).__init__()
+        logging.info(f"ModelK5 initialized with inception kernel sizes {inception_kernel_sizes} and dropout_rate {dropout_rate}")
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU()
         )
-        self.norm = nn.LayerNorm(embed_dim)
-        
-    def forward(self, query, key_value):
-        # query: (batch, embed_dim)
-        # key_value: (batch, embed_dim)
-        
-        # Add sequence dimension
-        query = query.unsqueeze(1)  # (batch, 1, embed_dim)
-        key_value = key_value.unsqueeze(1)  # (batch, 1, embed_dim)
-        
-        attn_output, _ = self.multihead_attn(query, key_value, key_value)
-        attn_output = attn_output.squeeze(1)  # (batch, embed_dim)
-        
-        output = self.norm(query.squeeze(1) + attn_output)
-        return output
 
-
-class HybridCNNViT(nn.Module):
-    def __init__(self, embed_dim=256, num_heads=8, num_layers=4, mlp_dim=512, num_classes=2, dropout_rate=0.3):
-        super(HybridCNNViT, self).__init__()
-        
-        # Separate CNN encoders for miRNA and mRNA
-        self.mirna_cnn = CNNEncoder(dropout_rate=dropout_rate)
-        self.mrna_cnn = CNNEncoder(dropout_rate=dropout_rate)
-        
-        # Separate ViT encoders
-        self.mirna_vit = ViTEncoder(embed_dim, num_heads, num_layers, mlp_dim)
-        self.mrna_vit = ViTEncoder(embed_dim, num_heads, num_layers, mlp_dim)
-        
-        # Cross attention
-        self.mirna_cross_attn = CrossAttention(embed_dim, num_heads)
-        self.mrna_cross_attn = CrossAttention(embed_dim, num_heads)
-        
-        # Final classifier
-        self.classifier = nn.Sequential(
-            nn.Linear(embed_dim * 2, 512),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(512, 128),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(128, num_classes)
+        self.inception_block = InceptionBlock(
+            in_channels=out_channels,
+            out_channels=64,
+            kernel_sizes=inception_kernel_sizes,
+            dropout_rate=0.1
         )
-        
-    def forward(self, mrna, mirna):
-        # CNN encoding
-        mirna_features = self.mirna_cnn(mirna)  # (batch, 256, 4, 4)
-        mrna_features = self.mrna_cnn(mrna)    # (batch, 256, 4, 4)
-        
-        # ViT encoding - get CLS tokens
-        mirna_cls = self.mirna_vit(mirna_features)  # (batch, embed_dim)
-        mrna_cls = self.mrna_vit(mrna_features)     # (batch, embed_dim)
-        
-        # Cross attention
-        mirna_attended = self.mirna_cross_attn(mirna_cls, mrna_cls)
-        mrna_attended = self.mrna_cross_attn(mrna_cls, mirna_cls)
-        
-        # Concatenate
-        combined = torch.cat([mirna_attended, mrna_attended], dim=1)
-        
-        # Classification
-        output = self.classifier(combined)
-        
-        return output
 
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
 
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=192,
+                out_channels=128,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Dropout2d(p=dropout_rate)
+        )
+
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=128,
+                out_channels=64,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Dropout2d(p=dropout_rate)
+        )
+
+        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+    
+    def forward(self, x):
+        x = self.conv1(x)           # output: 32*32*32
+        x = self.inception_block(x) # output: 192*32*32
+        x = self.pool1(x)           # output: 192*16*16
+        x = self.conv2(x)           # output: 128*16*16
+        x = self.pool2(x)           # output: 128*8*8
+        x = self.conv3(x)           # output: 64*8*8
+        x = self.pool3(x)           # output: 64*4*4
+        x = torch.flatten(input=x, start_dim=1)
+        return x
+    
+class ModelK6(nn.Module):
+    """
+    This model has been designed for 64*64 FCGR input
+    K=6
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, inception_kernel_sizes: list[int], dropout_rate: float):
+        super(ModelK6, self).__init__()
+        
+        logging.info(f"ModelK6 initialized with inception kernel sizes {inception_kernel_sizes} and dropout_rate {dropout_rate}")
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3, 
+                padding=1
+            ),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU()
+        )
+
+        self.inception_block = InceptionBlock(
+            in_channels=out_channels,
+            out_channels=64,
+            kernel_sizes=inception_kernel_sizes,
+            dropout_rate=0.1
+        )
+
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=192,
+                out_channels=128,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Dropout2d(p=dropout_rate)
+        )
+
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=128,
+                out_channels=64,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Dropout2d(p=dropout_rate)
+        )
+
+        self.pool3 = nn.AdaptiveMaxPool2d(output_size=(4,4)) # Try with AdaptiveAveragePool
+
+        self.dropout = nn.Dropout2d(p=dropout_rate)
+
+    def forward(self, x):
+        x = self.conv1(x)           # output: 32*64*64
+        x = self.inception_block(x) # output: 192*64*64
+        x = self.pool1(x)           # output: 192*32*32
+        x = self.conv2(x)           # output: 128*32*32
+        x = self.pool2(x)           # output: 128*16*16
+        x = self.conv3(x)           # output: 64*16*16
+        x = self.pool3(x)           # output: 64*4*4
+        x = self.dropout(x)
+        x = torch.flatten(input=x, start_dim=1)
+        return x
+
+class InteractionModel(nn.Module):
+    def __init__(self, dropout_rate: float, k: int):
+        super(InteractionModel, self).__init__()
+        self.dropout_rate = dropout_rate
+        self.k = k
+        # Load model according to the k_mer provided
+        match self.k:
+            case 3:
+                self.m_rna_model = ModelK3(in_channels=1,
+                                           out_channels=32,
+                                           inception_kernel_sizes=[1,5,9],
+                                           dropout_rate=dropout_rate)
+                self.mi_rna_model = ModelK3(in_channels=1,
+                                            out_channels=32,
+                                            inception_kernel_sizes=[1,3,5],
+                                            dropout_rate=dropout_rate)
+            case 4:
+                self.m_rna_model = ModelK4(in_channels=1,
+                                           out_channels=32,
+                                           inception_kernel_sizes=[1,5,9],
+                                           dropout_rate=dropout_rate)
+                self.mi_rna_model = ModelK4(in_channels=1,
+                                            out_channels=32,
+                                            inception_kernel_sizes=[1,3,5],
+                                            dropout_rate=dropout_rate)
+            case 5:
+                self.m_rna_model = ModelK5(in_channels=1,
+                                           out_channels=32,
+                                           inception_kernel_sizes=[1,5,9],
+                                           dropout_rate=dropout_rate)
+                self.mi_rna_model = ModelK5(in_channels=1,
+                                            out_channels=32,
+                                            inception_kernel_sizes=[1,3,5],
+                                            dropout_rate=dropout_rate)
+            case 6:
+                self.m_rna_model = ModelK6(in_channels=1,
+                                           out_channels=32,
+                                           inception_kernel_sizes=[1,5,9],
+                                           dropout_rate=dropout_rate)
+                self.mi_rna_model = ModelK6(in_channels=1,
+                                            out_channels=32,
+                                            inception_kernel_sizes=[1,3,5],
+                                            dropout_rate=dropout_rate)
+            case _:
+                logging.error(f"Invalid k_mer provided: {self.k}. It should be between 3-9")
+                raise ValueError(f"Invalid k_mer provided: {self.k}. It should be between 3-9")
+        
+        self.fc = nn.Sequential(
+            # Assuming that each branch will output 64*4*4
+            nn.Linear(in_features=64*4*4*2, out_features=1024),
+            nn.BatchNorm1d(num_features=1024),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(in_features=1024, out_features=512),
+            nn.BatchNorm1d(num_features=512),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(in_features=512, out_features=128),
+            nn.BatchNorm1d(num_features=128),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(in_features=128, out_features=64),
+            nn.BatchNorm1d(num_features=64),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_rate * 0.6),
+
+            nn.Linear(in_features=64, out_features=32),
+            nn.BatchNorm1d(num_features=32),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_rate * 0.3), # Lower dropout rate before final prediction
+        )
+        self.output = nn.Linear(in_features=32, out_features=2)
+
+        self._initialize_weights()
+    
+    def forward(self, x_m_rna, x_mi_rna):
+        m_rna_features = self.m_rna_model(x_m_rna)
+        mi_rna_features = self.mi_rna_model(x_mi_rna)
+
+        combined_features = torch.cat(tensors=(m_rna_features, mi_rna_features), dim=1)
+
+        output = self.fc(combined_features)
+        final_output = self.output(output)
+        return final_output
+    
+    
+    def _initialize_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Conv2d):
+                nn.init.kaiming_normal_(tensor=module.weight, mode='fan_out', nonlinearity='relu')
+                if module.bias is not None:
+                    nn.init.constant_(tensor=module.bias, val=0)
+            
+            elif isinstance(module, nn.Linear):
+                nn.init.xavier_normal_(tensor=module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(tensor=module.bias, val=0)
+            
+            elif isinstance(module, (nn.BatchNorm2d, nn.BatchNorm1d)):
+                nn.init.constant_(tensor=module.weight, val=1)
+                nn.init.constant_(tensor=module.bias, val=0)

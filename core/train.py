@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from typing import Literal
 from utils.early_stop import EarlyStop
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 class Trainer:
     def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer, criterion: nn.Module, train_dataloader: DataLoader, val_dataloader: DataLoader, device: torch.device, epochs: int, early_stopping_patience: int, early_stopping_delta: float, early_stopping_mode: Literal["min", "mix"], save_path: str) -> None:
         self.model = model
@@ -100,7 +100,7 @@ class Trainer:
 
                 all_predictions.extend(predictions.cpu().numpy())
                 all_labels.extend(label.cpu().numpy())
-                all_probabilities.extend(probabilities.cpu().numpy())
+                all_probabilities.extend(probabilities[:, 1].cpu().numpy())
 
                 # Calculate running accuracy
                 running_accuracy = accuracy_score(all_labels, all_predictions)
@@ -111,8 +111,21 @@ class Trainer:
         # Calculate Average Loss and Total Accuracy for the epoch
         avg_loss = total_loss / len(self.val_dataloader)
         total_accuracy = accuracy_score(all_labels, all_predictions)
+        precision = precision_score(all_labels, all_predictions)
+        recall = recall_score(all_labels, all_predictions)
+        f1 = f1_score(all_labels, all_predictions)
+        auc_roc = roc_auc_score(all_labels, all_probabilities)
 
-        logging.info(f"Epoch: {epoch + 1}, Loss: {avg_loss:.4f}, Accuracy: {total_accuracy:.4f}")
+
+        logging.info("*" * 50)
+        logging.info(f"Validation Result - Epoch: {epoch + 1}")
+        logging.info("*" * 50)
+        logging.info(f"Accuracy: {total_accuracy}")
+        logging.info(f"Loss: {avg_loss}")
+        logging.info(f"Precision: {precision}")
+        logging.info(f"Recall: {recall}")
+        logging.info(f"F1 Score: {f1}")
+        logging.info(f"AUC-ROC: {auc_roc}")
         return avg_loss, total_accuracy
     
     def train(self):
@@ -157,5 +170,6 @@ class Trainer:
 
             if should_stop:
                 logging.info(f"Early stopping triggered on epoch {epoch + 1}...")
+                logging.info(f"Best Val Accuracy: {best_val_accuracy:.4f}, Best Val Loss: {best_val_loss:.4f}")
                 break
         return best_val_accuracy, best_val_loss, train_accuracies, train_losses, val_accuracies, val_losses

@@ -1,11 +1,14 @@
-2025-11-22 20:31:08 - INFO - Dataset Shape: (62215, 3),
+2025-11-22 21:14:18 - INFO - Dataset Shape: (62215, 3),
 Distribution: validation
 1    32075
 0    30140
 Name: count, dtype: int64
-2025-11-22 20:31:08 - INFO - Distribution after removing duplicates: validation
+2025-11-22 21:14:18 - INFO - Distribution after removing duplicates: validation
 1    31728
 0    30136
 Name: count, dtype: int64
-2025-11-22 20:31:08 - INFO - Train Dataloader Size: 1547
-2025-11-22 20:31:08 - INFO - Validation Dataloader Size: 387
+2025-11-22 21:14:18 - INFO - Train Dataloader Size: 1547
+2025-11-22 21:14:18 - INFO - Validation Dataloader Size: 387
+2025-11-22 21:14:18 - INFO - ModelK6 initialized with inception kernel sizes [1, 5, 9] and dropout_rate 0.3
+2025-11-22 21:14:18 - INFO - ModelK6 initialized with inception kernel sizes [1, 3, 5] and dropout_rate 0.3
+2025-11-22 21:14:20 - INFO - Total model parameters: 3586274

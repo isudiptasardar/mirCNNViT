@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import random
 from utils.dataset import FCGRDataset
-from core.model import HybridCNNViT
+from core.model import InteractionModel
 from config import CONFIG
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
@@ -46,7 +46,11 @@ def objective(trial: optuna.Trial):
     seed_all(seed=CONFIG['seed'])
 
     # Hyperparameter Tuning
-    batch_size = trial.suggest_categorical('batch_size', [32, 64])
+    batch_size = trial.suggest_categorical('batch_size', [8, 16, 32, 64, 128, 256])
+    k_mer = trial.suggest_categorical('k_mer', [3, 4, 5, 6])
+    lr = trial.suggest_loguniform('lr', 1e-5, 1e-1)
+    weight_decay = trial.suggest_loguniform('weight_decay', 1e-5, 1e-1)
+    dropout_rate = trial.suggest_uniform('dropout_rate', 0.1, 0.5)
 
     df = pd.read_csv(CONFIG['raw_data_path'])
     required_cols = [CONFIG['m_rna_col'], CONFIG['mi_rna_col'], CONFIG['label_col']]
@@ -64,8 +68,8 @@ def objective(trial: optuna.Trial):
         train_df, val_df = train_test_split(df, test_size=0.2, random_state=CONFIG['seed'], shuffle=True, stratify=df[CONFIG['label_col']])
 
         # Load Dataset
-        train_ds = FCGRDataset(data=train_df, k = 6, m_rna_col=CONFIG['m_rna_col'], mi_rna_col=CONFIG['mi_rna_col'], label_col=CONFIG['label_col'], dataset_type="Training")
-        val_ds = FCGRDataset(data=val_df, k = 6, m_rna_col=CONFIG['m_rna_col'], mi_rna_col=CONFIG['mi_rna_col'], label_col=CONFIG['label_col'], dataset_type="Validation")
+        train_ds = FCGRDataset(data=train_df, k = k_mer, m_rna_col=CONFIG['m_rna_col'], mi_rna_col=CONFIG['mi_rna_col'], label_col=CONFIG['label_col'], dataset_type="Training")
+        val_ds = FCGRDataset(data=val_df, k = k_mer, m_rna_col=CONFIG['m_rna_col'], mi_rna_col=CONFIG['mi_rna_col'], label_col=CONFIG['label_col'], dataset_type="Validation")
 
         # Dataloader
         train_dataloader = DataLoader(dataset=train_ds, batch_size=batch_size, shuffle=True, num_workers=CONFIG['num_workers'], worker_init_fn=seed_worker)
@@ -74,14 +78,18 @@ def objective(trial: optuna.Trial):
         logging.info(f"Train Dataloader Size: {len(train_dataloader)}")
         logging.info(f"Validation Dataloader Size: {len(val_dataloader)}")
 
-        model = HybridCNNViT(embed_dim=256, num_heads=8, num_layers=4, mlp_dim=512, num_classes=2, dropout_rate=0.3).to(CONFIG['device'])
+        # model = HybridCNNViT(embed_dim=256, num_heads=8, num_layers=4, mlp_dim=512, num_classes=2, dropout_rate=0.3).to(CONFIG['device'])
+        model = InteractionModel(dropout_rate=dropout_rate, k=k_mer)
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
+        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
+        # Print total model parameters
+        total_params = sum(p.numel() for p in model.parameters())
+        logging.info(f"Total model parameters: {total_params}")
+
+        # Train
         best_val_accuracy, best_val_loss, train_accuracies, train_losses, val_accuracies, val_losses = Trainer(model=model, optimizer=optimizer, criterion=criterion, train_dataloader=train_dataloader, val_dataloader=val_dataloader, device=CONFIG['device'], epochs=100, early_stopping_patience=10, early_stopping_delta=0.0001, early_stopping_mode="max", save_path="out").train()
-
-        logging.info(f"Best Validation Accuracy: {best_val_accuracy}")
-        logging.info(f"Best Validation Loss: {best_val_loss}")
+        
         return best_val_accuracy
         
 
