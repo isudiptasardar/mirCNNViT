@@ -111,9 +111,9 @@ class Trainer:
         # Calculate Metrics for each epoch validation
         avg_loss = total_loss / len(self.val_dataloader)
         total_accuracy = accuracy_score(all_labels, all_predictions)
-        precision = precision_score(all_labels, all_predictions)
-        recall = recall_score(all_labels, all_predictions)
-        f1 = f1_score(all_labels, all_predictions)
+        precision = precision_score(all_labels, all_predictions, zero_division=0)
+        recall = recall_score(all_labels, all_predictions, zero_division=0)
+        f1 = f1_score(all_labels, all_predictions, zero_division=0)
         auc_roc = roc_auc_score(all_labels, all_probabilities)
 
 

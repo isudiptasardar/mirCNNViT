@@ -45,13 +45,12 @@ def seed_all(seed: int):
 def objective(trial: optuna.Trial):
     
     seed_all(seed=CONFIG['seed'])
-    torch.cuda.empty_cache()
 
     # Hyperparameter Tuning
     batch_size = trial.suggest_categorical('batch_size', [8, 16, 32, 64, 128, 256])
     k_mer = trial.suggest_categorical('k_mer', [3, 4, 5, 6])
-    lr = trial.suggest_float('lr', 1e-5, 1e-1)
-    weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-1)
+    lr = trial.suggest_float('lr', 1e-5, 1e-1, log=True)
+    weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3)
     dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.5)
 
     df = pd.read_csv(CONFIG['raw_data_path'])
@@ -94,11 +93,15 @@ def objective(trial: optuna.Trial):
 
         del model
         del optimizer
+        del criterion
         del train_dataloader, val_dataloader
         del train_ds, val_ds
-        torch.cuda.empty_cache()
-        gc.collect()
 
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
+        gc.collect()
 
         return best_val_accuracy
         
@@ -125,8 +128,8 @@ def objective(trial: optuna.Trial):
         logging.info(f"Test Dataloader Size: {len(test_dataloader)}")
 
 def main():
-    study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=100)
+    study = optuna.create_study(direction="maximize", study_name="mirCNN")
+    study.optimize(objective, n_trials=300)
 if __name__ == "__main__":
     setup_logger()
     main()
