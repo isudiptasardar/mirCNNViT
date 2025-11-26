@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 from torch import optim
 from core.train import Trainer
 import optuna
+import gc
 
 def setup_logger():
     logging.basicConfig(
@@ -44,13 +45,14 @@ def seed_all(seed: int):
 def objective(trial: optuna.Trial):
     
     seed_all(seed=CONFIG['seed'])
+    torch.cuda.empty_cache()
 
     # Hyperparameter Tuning
     batch_size = trial.suggest_categorical('batch_size', [8, 16, 32, 64, 128, 256])
     k_mer = trial.suggest_categorical('k_mer', [3, 4, 5, 6])
-    lr = trial.suggest_loguniform('lr', 1e-5, 1e-1)
-    weight_decay = trial.suggest_loguniform('weight_decay', 1e-5, 1e-1)
-    dropout_rate = trial.suggest_uniform('dropout_rate', 0.1, 0.5)
+    lr = trial.suggest_float('lr', 1e-5, 1e-1)
+    weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-1)
+    dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.5)
 
     df = pd.read_csv(CONFIG['raw_data_path'])
     required_cols = [CONFIG['m_rna_col'], CONFIG['mi_rna_col'], CONFIG['label_col']]
@@ -89,7 +91,15 @@ def objective(trial: optuna.Trial):
 
         # Train
         best_val_accuracy, best_val_loss, train_accuracies, train_losses, val_accuracies, val_losses = Trainer(model=model, optimizer=optimizer, criterion=criterion, train_dataloader=train_dataloader, val_dataloader=val_dataloader, device=CONFIG['device'], epochs=100, early_stopping_patience=10, early_stopping_delta=0.0001, early_stopping_mode="max", save_path="out").train()
-        
+
+        del model
+        del optimizer
+        del train_dataloader, val_dataloader
+        del train_ds, val_ds
+        torch.cuda.empty_cache()
+        gc.collect()
+
+
         return best_val_accuracy
         
 

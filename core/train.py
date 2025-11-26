@@ -108,7 +108,7 @@ class Trainer:
                 # Update progress bar
                 progress_bar.set_postfix({"Loss": f'{loss.item():.4f}', "Accuracy": f'{running_accuracy:.4f}'})
 
-        # Calculate Average Loss and Total Accuracy for the epoch
+        # Calculate Metrics for each epoch validation
         avg_loss = total_loss / len(self.val_dataloader)
         total_accuracy = accuracy_score(all_labels, all_predictions)
         precision = precision_score(all_labels, all_predictions)
@@ -117,9 +117,7 @@ class Trainer:
         auc_roc = roc_auc_score(all_labels, all_probabilities)
 
 
-        logging.info("*" * 50)
-        logging.info(f"Validation Result - Epoch: {epoch + 1}")
-        logging.info("*" * 50)
+        
         logging.info(f"Accuracy: {total_accuracy}")
         logging.info(f"Loss: {avg_loss}")
         logging.info(f"Precision: {precision}")
@@ -140,6 +138,9 @@ class Trainer:
         best_val_loss: float = float('inf')
 
         for epoch in range(self.epochs):
+            logging.info("*" * 50)
+            logging.info(f"Epoch: {epoch + 1}")
+            logging.info("*" * 50)
             train_loss, train_accuracy = self.train_epoch(epoch)
             val_loss, val_accuracy = self.validate_epoch(epoch)
 
