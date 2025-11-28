@@ -128,8 +128,11 @@ def objective(trial: optuna.Trial):
         logging.info(f"Test Dataloader Size: {len(test_dataloader)}")
 
 def main():
-    study = optuna.create_study(direction="maximize", study_name="mirCNN")
+    sampler = optuna.samplers.TPESampler(seed=CONFIG['seed'], multivariate=True, consider_prior=False, n_startup_trials=20)
+    study = optuna.create_study(direction="maximize", study_name="mirCNN", sampler=sampler)
     study.optimize(objective, n_trials=300)
+    print("Best Parameters: ", study.best_params)
+    
 if __name__ == "__main__":
     setup_logger()
     main()
